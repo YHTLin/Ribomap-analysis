@@ -1,0 +1,419 @@
+---
+title: "Ribosome Profiling on GTML5 Mouse Cells under M1071 and Rapamycin Treatment"
+date: "December 14, 2017"
+output:
+  pdf_document:
+    fig_caption: yes
+    toc: true # table of content true
+    toc_depth: 3  # upto three depths of headings (specified by #, ## and ###)
+    number_sections: true  ## if you want number sections at each table header
+    highlight: tango  # specifies the syntax highlighting style
+---
+```{r include=FALSE}
+# Step 1 - Set working directory and increase memory size for xlsx file writing
+setwd("C:/Users/Tony Lin/Desktop/Wiita_Lab/Projects/Proteomics_project/Pulsed_silac_Ozlem/Ribosome_profiling")
+
+
+
+# Step 2 - Load saved workspace with analyses
+##Need to run ribosome_profiling_analysis.R
+load("ribosome_profiling_workspace.RData")
+
+
+
+# Step 3 - Data visualization functions
+pairs_plot = function(df, pattern) {
+  # df = data frame containing columns to be plotted
+  # pattern = regular expression for filtering relevant columns
+  require(gpairs)
+  require(scales)
+  gpairs(df[, grep(pattern, names(df), value = TRUE)],
+       upper.pars = list(scatter = "lm"),
+       scatter.pars = list(pch = 20,
+                           col = alpha("black", 0.3)),
+       lower.pars = list(scatter = "stats"),
+       stat.pars = list(verbose = FALSE, fontsize = 15))
+}
+
+
+# Volcano plot
+plot_volcano = function(df, ratio_cutoff = 1, P_cutoff = 0.05, title = "") {
+  # df = dataframe containing plot data
+  # ratio_cutoff = threshold of biological significance
+  # P_cutoff = threshold of statistical significance
+  # title = character indicating plot title
+  
+  # Assign color
+  df$color = "black"
+  df$color[df$LOG2.RATIO > ratio_cutoff & df$Pvalue < P_cutoff] = "darkgreen"
+  df$color[df$LOG2.RATIO < -ratio_cutoff & df$Pvalue < P_cutoff] = "red"
+  df$trans = 0.3   # point transparency
+  df$trans[df$color != "black"] = 1
+  df$color = factor(df$color)
+  
+  require(ggplot2)
+  require(ggrepel)
+  print(ggplot(df) +
+    geom_point(aes(LOG2.RATIO, LOG.Pvalue, colour = color, alpha = trans)) +
+    scale_colour_manual(values = levels(df$color)) + 
+    geom_hline(yintercept = -log10(P_cutoff), linetype = "dashed", color = "gray50") +
+    geom_vline(xintercept = c(ratio_cutoff, -ratio_cutoff), linetype = "dashed", color = "gray50") +
+    ylab(expression("- log"[10]*"( P-value )")) +
+    scale_x_continuous(
+      name = (expression("log"[2]*"( fold change )")),
+      breaks = seq(-10, 10, 1)) +
+    geom_text_repel(
+      data = subset(df, df$trans == 1),
+      aes(LOG2.RATIO, LOG.Pvalue, label = symbol2, colour = color),
+      size = 3) +
+    ggtitle(title) +
+    theme(legend.position="none",
+          plot.title = element_text(hjust = 0.5)))
+}
+
+
+# Heatmap
+heatmap_plot = function(df, pattern, display_regex) {
+  # df = data frame containing columns to be plotted
+  # pattern = regular expression for filtering relevant columns
+  # display_regex = regular expression for subsetting column names for display
+  require(gplots)
+  require(RColorBrewer)
+  require(stringr)
+  col_names = grep(pattern, names(df), value = TRUE)
+  display_names = str_extract(col_names, display_regex)
+  df = as.matrix(df[col_names])   #heatmap.2 takes matrix as input
+  colnames(df) = display_names   #assign names displayed on heatmap
+  
+  #samples = str_extract(col_names, sample_regex)
+  #colColors = brewer.pal(3, "Dark2")[as.numeric(as.factor(samples))]   #Color columns by sample
+  col.pan <- colorpanel(100, "blue", "white", "red")   #color scale for low and high heat colors
+  heatmap.2(df, 
+            col = col.pan, # Heat colors
+            Rowv = TRUE, Colv = FALSE,   #Do not reorder columns
+            #distfun = dist,   #Defaults to "euclidean"
+            scale = "none",   #no scaling (use normalized values)
+            dendrogram = "none",   #Show dendrogram for columns only
+            trace = "none",   #Removes solid line between columns
+            cexCol = 1,   #Size of column labels
+            labRow = FALSE,   #Turn off row labels
+            margin = c(10,3), # bottom margin, left margin of the plot
+            lhei = c(1.25,8), lwid = c(1.5,6),   # legend size, heatmap size
+            #ColSideColors = colColors, #Color by sample
+            density.info = "histogram",   #Color-key
+            key.par = list(cex=0.5), 
+            key.title = "Normalized values", 
+            key.xlab = "", key.ylab = "Counts",
+            xlab = "Sample Name", ylab = "Transcripts")
+}
+```
+
+
+\newpage
+# Motivation
+
+Signaling pathways are responsible for coordinating cell behavior, and when dysregulated they often lead to disease. The PIK3CA-AKT-mTOR pathway is commonly activated in human cancers. It plays an important role in cell cycle regulation, metabolism, and protein synthesis. One of its members, the mechanistic target of rapamycin (mTOR), is an serine/threonine kinase whose over-activation promotes tumor progression. To reverse the effect of increased mTOR activity, mTOR inhibitors, such as rapamycin (first generation) and mTOR kinase inhibitors (second generation), are prescribed as cancer therapy. However, over time, natural selection of tumors results in drug resistance and clinical relapse. To counteract mTOR mutants, Rodrik-Outmezguine et al. recently developed a third-generation mTOR inhibitor called Rapalink-1 (M1071). M1071 has been established by Fan et al. as a potent drug for brain tumors owing to its ability to cross the blood-brain barrier. While the mechanism of action of M1071 is known by design, its downstream effects on biological processes, such as protein translation, are not well understood. The goal of this study is to identify proteins whose biosyntheses are sensitive to M1071 in the context of neural cells. We aim to monitor changes in protein translation using two techniques, ribosome profiling and pulsed SILAC proteomics.
+
+
+# Ribosome Profiling Workflow and Data Analysis
+
+1. Ozlem split GTML5 mouse cells into nine cultures. Three were treated with DMSO, three with rapamycin, and three with M1071. Cells were incubated for three hours before harvesting for ribosome footprinting and RNAseq.
+2. Arun analyzed the ribosome profiling data with [Ribomap](https://github.com/Kingsford-Group/ribomap). The output STATS files are organized as follows:
+    + **refID**: Transcript index in the transcriptome fasta file.
+    + **tid**: Transcript header name in the transcriptome fasta file.
+    + **rabd**: Ribosome loads, which is the total number of ribosome-protected fragments mapped to the transcript.
+    + **tabd**: Relative transcript abundance from RNAseq.
+    + **te**: Relative translational efficiency, which is the ratio between **rabd** and **tabd**.
+3. Ribomap output was processed and visualized in R.
+    + Read STATS files from Ribomap into R.
+    + Applied pre-processing to organize transcripts into rows and their descriptors into columns.
+    + Merged sample data tables by ENSEMBL transcript IDs to create a master table.
+    + Removed uninformative data.
+        + Transcripts with **rabd** less than 128 in any sample were omitted.
+        + Transcripts with more than one missing value in any condition were omitted.
+    + Applied log~2~-transformation to normalize the data.
+    + Subtracted the column median from each value to center columns at log~2~ of 0.
+    + Performed Welch's two-sample, two-tailed t-test on replicates to evaluate statistical significance of biological change.
+    + Wrote data tables into Excel files.
+        + *all_treatment_merged_ribomap_output*: Filtered, transformed, and normalized data containing all three conditions and their corresponding replicates.
+        + *ratios_relative_transcript_abundance*: Derived from *all_treatment_merged_ribomap_output* and contains pairwise statistical comparisons of the three conditions by relative transcript abundance.
+        + *ratios_ribosome_load*: Derived from *all_treatment_merged_ribomap_output* and contains pairwise statistical comparisons of the three conditions by ribosome load.
+        + *ratios_translational_efficiency*: Derived from *all_treatment_merged_ribomap_output* and contains pairwise statistical comparisons of the three conditions by translational efficiency.
+    + *Notes on Excel markings in the* ratio *tables:*
+        + Red highlight = *LOG2.RATIO* less than -1 (or greater than 2-fold decrease).
+        + Green highlight = *LOG2.RATIO* greater than 1 (or greater than 2-fold increase).
+        + Bold = *Pvalue* less than 0.05.
+
+
+\begin{table}[!h]
+\centering
+\caption{Summary statistics on the processed samples}
+\label{Table1}
+\begin{tabular}{ p{2.5cm} p{3cm} p{3cm} p{3cm} p{3.5cm} }
+\hline \\ [-1.5ex]
+Samples & \# transcripts & \# rabd $\geq$ 128 & \# after merging & \# after missing value filtering\\ [1ex]
+\hline \\ [-1.5ex]
+DMSO-1 & `r nrow(raw.data$"DMSO-1")` & `r nrow(pro.data$"DMSO-1")` & `r nrow(all)` & `r nrow(all.filtered)`\\ [1ex]
+DMSO-2 & `r nrow(raw.data$"DMSO-2")` & `r nrow(pro.data$"DMSO-2")` & `r nrow(all)` & `r nrow(all.filtered)`\\ [1ex]
+DMSO-3 & `r nrow(raw.data$"DMSO-3")` & `r nrow(pro.data$"DMSO-3")` & `r nrow(all)` & `r nrow(all.filtered)`\\ [1ex]
+M1071-1 & `r nrow(raw.data$"M1071-1")` & `r nrow(pro.data$"M1071-1")` & `r nrow(all)` & `r nrow(all.filtered)`\\ [1ex]
+M1071-2 & `r nrow(raw.data$"M1071-2")` & `r nrow(pro.data$"M1071-2")` & `r nrow(all)` & `r nrow(all.filtered)`\\ [1ex]
+M1071-3 & `r nrow(raw.data$"M1071-3")` & `r nrow(pro.data$"M1071-3")` & `r nrow(all)` & `r nrow(all.filtered)`\\ [1ex]
+Rapamycin-1 & `r nrow(raw.data$"Rapamycin-1")` & `r nrow(pro.data$"Rapamycin-1")` & `r nrow(all)` & `r nrow(all.filtered)`\\ [1ex]
+Rapamycin-2 & `r nrow(raw.data$"Rapamycin-2")` & `r nrow(pro.data$"Rapamycin-2")` & `r nrow(all)` & `r nrow(all.filtered)`\\ [1ex]
+Rapamycin-3 & `r nrow(raw.data$"Rapamycin-3")` & `r nrow(pro.data$"Rapamycin-3")` & `r nrow(all)` & `r nrow(all.filtered)`\\ [1ex]
+\hline
+\end{tabular}
+\end{table}
+
+
+# About the Figures
+  
+  * The **correlation figures** show the distribution of each sample along the diagonal. In the upper right corner, the scatter plots depict associations between any two sets of data. The linear regression line is drawn in red. The correlation coefficients are displayed in the lower left corner. Due to the nature of our filter, missing values are allowed and are reported.
+  
+  * The **volcano plots** display each transcript as a point on the x- and y-axes representing biological and statistical significance, respectively. The statistical test used to call significance is described above. Significantly up- and down-regulated transcripts are colored in green and red, respectively. The dotted horizontal line corresponds to a P-value of 0.05. The dotted vertical lines are drawn arbitrarily to accommodate point labels. It is important to note that the P-values used for plotting are not FDR-controlled. Please see the *ratio* Excel files for P-values corrected by the Benjamini-Hochberg method.
+  
+  * The **heatmaps** enable comparisons of ribosome load, transcript level, and translational efficiency under individual conditions or ratios between conditions. Each row is a transcript, and its normalized values are coded by color (blue = low, white = medium, red = high). Depending on the figure, either the averages of the replicates were taken or the log~2~ fold changes were calculated.
+  
+  * **All figures are generated from the *ratio* Excel tables.**
+
+
+
+\newpage
+# Correlation Plots Between Replicates
+
+## Ribomap output: ribosome load
+
+### DMSO Treatment
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=6, fig.width=7, fig.pos="!h"}
+# rabd DMSO pairs plot
+pairs_plot(rabd$raw, "^LOG2.*DMSO")
+```
+
+\newpage
+### M1071 Treatment
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=6, fig.width=7, fig.pos="!h"}
+# rabd M1071 pairs plot
+pairs_plot(rabd$raw, "^LOG2.*M1071")
+```
+
+\newpage
+### Rapamycin Treatment
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=6, fig.width=7, fig.pos="!h"}
+# rabd Rapamycin pairs plot
+pairs_plot(rabd$raw, "^LOG2.*Rapa")
+```
+
+
+\newpage
+## Ribomap output: relative transcript abundance
+
+### DMSO Treatment
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=6, fig.width=7, fig.pos="!h"}
+# tabd DMSO pairs plot
+pairs_plot(tabd$raw, "^LOG2.*DMSO")
+```
+
+\newpage
+### M1071 Treatment
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=6, fig.width=7, fig.pos="!h"}
+# tabd M1071 pairs plot
+pairs_plot(tabd$raw, "^LOG2.*M1071")  #one outlier in replicate 3 (ENSMUST00000084125.5)
+```
+
+\newpage
+### Rapamycin Treatment
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=6, fig.width=7, fig.pos="!h"}
+# tabd Rapamycin pairs plot
+pairs_plot(tabd$raw, "^LOG2.*Rapa")
+```
+
+
+\newpage
+## Ribomap output: translational efficiency
+
+### DMSO Treatment
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=6, fig.width=7, fig.pos="!h"}
+# te DMSO pairs plot
+pairs_plot(te$raw, "^LOG2.*DMSO")
+```
+
+\newpage
+### M1071 Treatment
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=6, fig.width=7, fig.pos="!h"}
+# te M1071 pairs plot
+pairs_plot(te$raw, "^LOG2.*M1071")
+```
+
+\newpage
+### Rapamycin Treatment
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=6, fig.width=7, fig.pos="!h"}
+# te Rapamycin pairs plot
+pairs_plot(te$raw, "^LOG2.*Rapa")
+```
+
+
+
+\newpage
+# Correlation Plots Between Treatment Groups
+
+## Ribomap output: ribosome load
+
+### DMSO vs M1071 vs Rapamycin
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=6, fig.width=7, fig.pos="!h"}
+# rabd MEAN.LOG2
+pairs_plot(rabd$raw, "^MEAN\\.LOG2")
+```
+
+
+\newpage
+## Ribomap output: relative transcript abundance
+
+### DMSO vs M1071 vs Rapamycin
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=6, fig.width=7, fig.pos="!h"}
+# tabd MEAN.LOG2
+pairs_plot(tabd$raw, "^MEAN\\.LOG2")
+```
+
+
+\newpage
+## Ribomap output: translational efficiency
+
+### DMSO vs M1071 vs Rapamycin
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=6, fig.width=7, fig.pos="!h"}
+# te MEAN.LOG2
+pairs_plot(te$raw, "^MEAN\\.LOG2")
+```
+
+
+
+\newpage
+# Volcano Plots Between Treatment Groups
+
+## Ribomap output: ribosome load
+
+### M1071 vs DMSO
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=6, fig.width=7, fig.pos="!h"}
+# rabd M1071/DMSO volcano plot
+plot_volcano(rabd$M1071.DMSO, ratio_cutoff = 2, title = "Ribosome load M1071/DMSO")
+```
+
+\newpage
+### Rapamycin vs DMSO
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=6, fig.width=7, fig.pos="!h"}
+# rabd Rapa/DMSO volcano plot
+plot_volcano(rabd$Rapa.DMSO, ratio_cutoff = 1, title = "Ribosome load rapamycin/DMSO")
+```
+
+\newpage
+### Rapamycin vs M1071
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=6, fig.width=7, fig.pos="!h"}
+# rabd Rapa/M1071 volcano plot
+plot_volcano(rabd$Rapa.M1071, ratio_cutoff = 2, title = "Ribosome load rapamycin/M1071")
+```
+
+\newpage
+## Ribomap output: relative transcript abundance
+
+### M1071 vs DMSO
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=6, fig.width=7, fig.pos="!h"}
+# tabd M1071/DMSO volcano plot
+plot_volcano(tabd$M1071.DMSO, ratio_cutoff = 1, title = "Transcript abundance M1071/DMSO")
+```
+
+\newpage
+### Rapamycin vs DMSO
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=6, fig.width=7, fig.pos="!h"}
+# tabd Rapa/DMSO volcano plot
+plot_volcano(tabd$Rapa.DMSO, ratio_cutoff = 1, title = "Transcript abundance rapamycin/DMSO")
+```
+
+\newpage
+### Rapamycin vs M1071
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=6, fig.width=7, fig.pos="!h"}
+# tabd Rapa/M1071 volcano plot
+plot_volcano(tabd$Rapa.M1071, ratio_cutoff = 1.25, title = "Transcript abundance rapamycin/M1071")
+```
+
+\newpage
+## Ribomap output: translational efficiency
+
+### M1071 vs DMSO
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=6, fig.width=7, fig.pos="!h"}
+# te M1071/DMSO volcano plot
+plot_volcano(te$M1071.DMSO, ratio_cutoff = 2, title = "Translation efficiency M1071/DMSO")
+```
+
+\newpage
+### Rapamycin vs DMSO
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=6, fig.width=7, fig.pos="!h"}
+# te Rapa/DMSO volcano plot
+plot_volcano(te$Rapa.DMSO, ratio_cutoff = 1, title = "Translation efficiency rapamycin/DMSO")
+```
+
+\newpage
+### Rapamycin vs M1071
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=6, fig.width=7, fig.pos="!h"}
+# te Rapa/M1071 volcano plot
+plot_volcano(te$Rapa.M1071, ratio_cutoff = 2, title = "Translation efficiency rapamycin/M1071")
+```
+
+
+
+\newpage
+# Heatmaps
+
+## Ribomap Output Comparisons
+
+### DMSO Treatment
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=8.5, fig.width=7, fig.pos="!h"}
+# DMSO
+heatmap_plot(all.filtered, "^MEAN\\.LOG2.*DMSO", ".*(?=_.*)")
+```
+
+\newpage
+### M1071 Treatment
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=8.5, fig.width=7, fig.pos="!h"}
+# M1071
+heatmap_plot(all.filtered, "^MEAN\\.LOG2.*M1071", ".*(?=_.*)")
+```
+
+\newpage
+### Rapamycin Treatment
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=8.5, fig.width=7, fig.pos="!h"}
+# Rapamycin
+heatmap_plot(all.filtered, "^MEAN\\.LOG2.*Rapamycin", ".*(?=_.*)")
+```
+
+
+\newpage
+## Treatment Comparisons
+
+### M1071 vs DMSO
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=8.5, fig.width=7, fig.pos="!h"}
+# M1071/DMSO heatmap
+heatmap_plot(data.frame("M1071/DMSO.rabd" = rabd$M1071.DMSO$LOG2.RATIO,
+                        "M1071/DMSO.tabd" = tabd$M1071.DMSO$LOG2.RATIO,
+                        "M1071/DMSO.te" = te$M1071.DMSO$LOG2.RATIO),
+             ".*", ".*")
+```
+
+\newpage
+### Rapamycin vs DMSO
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=8.5, fig.width=7, fig.pos="!h"}
+# Rapa/DMSO heatmap
+heatmap_plot(data.frame("Rapa/DMSO.rabd" = rabd$Rapa.DMSO$LOG2.RATIO,
+                        "Rapa/DMSO.tabd" = tabd$Rapa.DMSO$LOG2.RATIO,
+                        "Rapa/DMSO.te" = te$Rapa.DMSO$LOG2.RATIO),
+             ".*", ".*")
+```
+
+\newpage
+### Rapamycin vs M1071
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=8.5, fig.width=7, fig.pos="!h"}
+# Rapa/M1071 heatmap
+heatmap_plot(data.frame("Rapa/M1071.rabd" = rabd$Rapa.M1071$LOG2.RATIO,
+                        "Rapa/M1071.tabd" = tabd$Rapa.M1071$LOG2.RATIO,
+                        "Rapa/M1071.te" = te$Rapa.M1071$LOG2.RATIO),
+             ".*", ".*")
+```
