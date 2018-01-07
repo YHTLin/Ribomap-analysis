@@ -145,7 +145,7 @@ welch_test = function(df, diff = c("M1071", "DMSO")) {
   result = data.frame(Pvalue = numeric(0), LOG2.RATIO = numeric(0))
   for (i in 1:nrow(df)) {
     stats = t.test(unlist(df[i, group1]), unlist(df[i, group2]), alternative = "two.sided",
-                   paired = FALSE, var.equal = FALSE)   #var.equal = Welch's test
+                   paired = FALSE, var.equal = FALSE)   #var.equal = FALSE means Welch's test
     #result[i, ] = c(stats$p.value, stats$estimate) #for paired
     result[i, ] = c(stats$p.value, stats$estimate[1] - stats$estimate[2]) #for unpaired
   }
