@@ -19,4 +19,6 @@ in protein translation using two techniques, ribosome profiling and pulsed SILAC
 ## Instructions
 1. Download the **STATS** file containing the Ribomap output from the [Kingsford Group](https://github.com/Kingsford-Group/ribomap).
 2. Download the R scripts and update the directory in the script to the location of the STATS file.
-3. Run **ribosome_profiling_analysis_technical_rep.R** followed by **ribosome_profiling_report_ozlem.R** to generate the report.
+3. Run **ribosome_profiling_analysis_technical_rep.R** followed by **ribosome_profiling_report_ozlem.R** to generate a comprehensive report.
+
+*NOTE: **ribosome_profiling_analysis_biological_rep.R** performs the statistical tests assuming that the replicates are biologically related (paired). However, the replicates in this experiment were gathered on the same day. The biological_rep script has since been updated and saved as the technical_rep version, which addresses this subtlety and implements an additional filtering function.*
