@@ -3,7 +3,7 @@
 ###################################################################
 
 # Step 1 - Set working directory and increase memory size for xlsx file writing
-setwd("C:/Users/Tony Lin/Desktop/Wiita_Lab/Projects/Proteomics_project/Pulsed_silac_Ozlem/Ribosome_profiling")
+#setwd("C:/Set/Working/Directory")
 
 
 
